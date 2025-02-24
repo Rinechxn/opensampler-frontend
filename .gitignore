@@ -20,5 +20,7 @@ dist-ssr
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
 *.sw?
+
+backend/builds/windows_vs2022/.vs/**
+backend/JuceLibraryCode/* 
