@@ -46,7 +46,7 @@
     "embla-carousel-react": "^8.5.2",
     "input-otp": "^1.4.2",
     "jszip": "^3.10.1",
-    "juce-framework-frontend-mirror": "^7.0.11",
+    "juce-framework-frontend": "link:external\\JUCE\\modules\\juce_gui_extra\\native\\javascript",
     "lodash": "^4.17.21",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.475.0",
