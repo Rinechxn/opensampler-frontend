@@ -29,9 +29,7 @@ export function EffectsControls({ sample, onUpdateProperty }: EffectsControlsPro
               })
             }
           />
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">
-            Compressor
-          </span>
+          <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Compressor</h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center">
@@ -79,9 +77,7 @@ export function EffectsControls({ sample, onUpdateProperty }: EffectsControlsPro
               })
             }
           />
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">
-            Reverb
-          </span>
+          <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Reverb</h3>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center">

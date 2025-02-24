@@ -14,13 +14,13 @@ export interface Sample {
         ratio: number;
         attack: number;
         release: number;
-        enabled?: boolean; // add this
+        enabled?: boolean; // Add this
     };
     reverb: {
         wet: number;
         decay: number;
         preDelay: number;
-        enabled?: boolean; // add this
+        enabled?: boolean; // Add this
     };
 }
 

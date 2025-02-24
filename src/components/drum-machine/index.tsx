@@ -173,8 +173,8 @@ const DrumSampler = () => {
       preDelay: sample.reverb.preDelay
     });
 
-    // Connect effects chain
-    let chain: Tone.ToneAudioNode = envelope;
+    // Connect effects chain conditionally
+    let chain: Tone.Signal | Tone.AmplitudeEnvelope = envelope;
     if (sample.compress.enabled !== false) {
       chain = chain.connect(compressor);
     }
