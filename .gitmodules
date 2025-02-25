@@ -5,3 +5,6 @@
 	path = external/clap-juce-extensions
 	url = https://github.com/free-audio/clap-juce-extensions.git
 	branch = main
+[submodule "external/jsoncpp"]
+	path = external/jsoncpp
+	url = https://github.com/open-source-parsers/jsoncpp

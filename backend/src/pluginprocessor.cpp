@@ -22,10 +22,17 @@ OpenSamplerAudioProcessor::OpenSamplerAudioProcessor()
                        )
 #endif
 {
+    // Start the timer that checks for pending MIDI messages
+    startTimer(10); // Check every 10ms
 }
 
 OpenSamplerAudioProcessor::~OpenSamplerAudioProcessor()
 {
+    stopTimer();
+    
+    // Clean up MIDI input
+    if (midiInput != nullptr)
+        midiInput->stop();
 }
 
 //==============================================================================
@@ -95,12 +102,18 @@ void OpenSamplerAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+    
+    // Clear any pending MIDI messages
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.clear();
 }
 
 void OpenSamplerAudioProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.clear();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -136,32 +149,51 @@ void OpenSamplerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
     // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
+    // channels that didn't contain input data
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
+    // Add any pending MIDI messages from external sources to the buffer
+    {
+        juce::ScopedLock lock(midiMessageLock);
+        midiMessages.addEvents(pendingMidiMessages, 0, buffer.getNumSamples(), 0);
+        pendingMidiMessages.clear();
+    }
+
+    // Process incoming MIDI messages to notify listeners
+    if (!midiMessages.isEmpty())
+    {
+        juce::ScopedLock listenersLock(midiListenersLock);
+        
+        if (midiMessageListeners.size() > 0)
+        {
+            juce::MidiBuffer::Iterator it(midiMessages);
+            juce::MidiMessage message;
+            int samplePosition;
+
+            while (it.getNextEvent(message, samplePosition))
+            {
+                for (auto& listener : midiMessageListeners)
+                {
+                    if (listener != nullptr)
+                        listener(message);
+                }
+            }
+        }
+    }
+
+    // Audio processing code here (left unchanged)
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         auto* channelData = buffer.getWritePointer (channel);
-
-        // ..do something to the data...
+        // ..process audio data..
     }
 }
 
 //==============================================================================
 bool OpenSamplerAudioProcessor::hasEditor() const
 {
-    return true; // (change this to false if you choose to not supply an editor)
+    return true;
 }
 
 juce::AudioProcessorEditor* OpenSamplerAudioProcessor::createEditor()
@@ -172,15 +204,120 @@ juce::AudioProcessorEditor* OpenSamplerAudioProcessor::createEditor()
 //==============================================================================
 void OpenSamplerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    // Store plugin state including MIDI settings
+    juce::ValueTree state("OPENSAMPLERPLUGINSTATE");
+    
+    // Store the last MIDI input device ID
+    if (lastMidiInputId.isNotEmpty())
+        state.setProperty("lastMidiInputId", lastMidiInputId, nullptr);
+    
+    juce::MemoryOutputStream stream(destData, true);
+    state.writeToStream(stream);
 }
 
 void OpenSamplerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    // Restore plugin state including MIDI settings
+    juce::ValueTree state = juce::ValueTree::readFromData(data, sizeInBytes);
+    
+    if (state.isValid())
+    {
+        // Restore MIDI device
+        if (state.hasProperty("lastMidiInputId"))
+        {
+            juce::String savedInputId = state.getProperty("lastMidiInputId");
+            setMidiInput(savedInputId);
+        }
+    }
+}
+
+//==============================================================================
+// MIDI device management
+
+void OpenSamplerAudioProcessor::setMidiInput(const juce::String& identifier)
+{
+    if (midiInput != nullptr)
+    {
+        midiInput->stop();
+        midiInput = nullptr;
+    }
+
+    if (identifier.isEmpty())
+        return;
+
+    auto devices = juce::MidiInput::getDevices();
+    int deviceIndex = devices.indexOf(identifier);
+    
+    if (deviceIndex >= 0)
+    {
+        midiInput = juce::MidiInput::openDevice(deviceIndex, this).release();
+        
+        if (midiInput != nullptr)
+        {
+            midiInput->start();
+            lastMidiInputId = identifier;
+        }
+    }
+}
+
+juce::StringArray OpenSamplerAudioProcessor::getMidiInputDevices()
+{
+    return juce::MidiInput::getDevices();
+}
+
+void OpenSamplerAudioProcessor::handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message)
+{
+    // Add message to the buffer to be processed in the audio thread
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.addEvent(message, 0);
+}
+
+// Handle MIDI events from the web interface
+void OpenSamplerAudioProcessor::sendMidiNoteOn(int channel, int noteNumber, float velocity)
+{
+    auto message = juce::MidiMessage::noteOn(channel + 1, noteNumber, velocity);
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.addEvent(message, 0);
+}
+
+void OpenSamplerAudioProcessor::sendMidiNoteOff(int channel, int noteNumber)
+{
+    auto message = juce::MidiMessage::noteOff(channel + 1, noteNumber);
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.addEvent(message, 0);
+}
+
+void OpenSamplerAudioProcessor::sendMidiControlChange(int channel, int controllerNumber, int value)
+{
+    auto message = juce::MidiMessage::controllerEvent(channel + 1, controllerNumber, value);
+    juce::ScopedLock lock(midiMessageLock);
+    pendingMidiMessages.addEvent(message, 0);
+}
+
+// Listener management for passing MIDI events to the web interface
+void OpenSamplerAudioProcessor::addMidiMessageListener(std::function<void(const juce::MidiMessage&)> callback)
+{
+    juce::ScopedLock lock(midiListenersLock);
+    midiMessageListeners.add(callback);
+}
+
+void OpenSamplerAudioProcessor::removeMidiMessageListener(std::function<void(const juce::MidiMessage&)> callback)
+{
+    juce::ScopedLock lock(midiListenersLock);
+    // Note: This might not work perfectly as it compares function objects.
+    // For a more robust solution, consider using a registration ID system.
+    for (int i = midiMessageListeners.size() - 1; i >= 0; i--)
+    {
+        // This is approximate as comparing function objects is implementation-dependent
+        if (midiMessageListeners.getReference(i) == callback)
+            midiMessageListeners.remove(i);
+    }
+}
+
+void OpenSamplerAudioProcessor::timerCallback()
+{
+    // This is called periodically to check for any pending tasks
+    // For example, updating UI with MIDI activity
 }
 
 //==============================================================================

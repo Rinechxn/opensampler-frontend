@@ -10,10 +10,13 @@
 
 #include <JuceHeader.h>
 #include "pluginprocessor.hpp"
+#include <functional>
+#include <vector>
+#include <memory>
+#include <json/json.h>
 
 //==============================================================================
-/**
-*/
+// Custom WebBrowserComponent
 struct SinglePageBrowser : juce::WebBrowserComponent {
     using WebBrowserComponent::WebBrowserComponent;
 
@@ -23,6 +26,39 @@ struct SinglePageBrowser : juce::WebBrowserComponent {
             newURL == getResourceProviderRoot();
     }
 };
+
+// MIDI Bridge to handle communication between JUCE and the web interface
+class MIDIBridge
+{
+public:
+    MIDIBridge(OpenSamplerAudioProcessor& processor);
+    ~MIDIBridge();
+    
+    // Handle messages from the web interface
+    void handleWebMessage(const juce::var& message);
+    
+private:
+    // Convert MIDI message to JSON
+    Json::Value midiMessageToJson(const juce::MidiMessage& message);
+    
+    // Send message to web interface
+    void sendToWeb(const Json::Value& data);
+    
+    // MIDI message callback
+    std::function<void(const juce::MidiMessage&)> midiCallback;
+    
+    // Reference to the processor
+    OpenSamplerAudioProcessor& audioProcessor;
+    
+    // Flag to avoid recursive calls
+    bool isProcessingMessage = false;
+    
+    friend class OpenSamplerAudioProcessorEditor;
+};
+
+//==============================================================================
+/**
+*/
 class OpenSamplerAudioProcessorEditor  : public juce::AudioProcessorEditor
 {
 public:
@@ -39,6 +75,12 @@ public:
     int getControlParameterIndex(juce::Component&) override {
         return controlParameterIndexReceiver.getControlParameterIndex();
     }
+    
+    // Handle messages from the web interface
+    void handleWebMessage(const juce::var& message);
+    
+    // Send message to the web interface
+    void sendMessageToWebView(const juce::String& jsonMessage);
 
 private:
     // This reference is provided as a quick way for your editor to
@@ -68,19 +110,14 @@ private:
             .withOptionsFrom(controlParameterIndexReceiver)
             .withResourceProvider(
                 [this](const auto& url) { return getResource(url); },
-                juce::URL{"http://localhost:5173/"}.getOrigin())};
+                juce::URL{"http://localhost:5173/"}.getOrigin())
+            .withScriptMessageCallback(
+                [this](const juce::String& message) { this->handleWebMessage(juce::JSON::parse(message)); },
+                "juceBridge")};
 
-    //==============================================================================
-    //juce::WebSliderParameterAttachment gainAttachment{
-    //    *audioProcessor.parameters.getParameter("gain"), gainRelay, nullptr};
-    //juce::WebSliderParameterAttachment panAttachment{
-    //    *audioProcessor.parameters.getParameter("panAngle"), panRelay, nullptr};
-    //juce::WebComboBoxParameterAttachment panModeAttachment{
-    //    *audioProcessor.parameters.getParameter("panRule"), panRuleRelay,
-    //    nullptr};
-    //juce::WebToggleButtonParameterAttachment bypassAttachment{
-    //    *audioProcessor.parameters.getParameter("bypass"), bypassRelay, nullptr};
-
+    // MIDI Bridge
+    std::unique_ptr<MIDIBridge> midiBridge;
+    
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenSamplerAudioProcessorEditor)
 };

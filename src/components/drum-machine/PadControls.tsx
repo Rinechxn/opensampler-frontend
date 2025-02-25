@@ -143,6 +143,7 @@ const PadControls = ({ selectedPad, sample, onUpdateProperty }: PadControlsProps
           <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Sample Editor</h3>
           <SampleEditor
             sample={sample!}
+            padId={selectedPad}
             onUpdateSample={(updates) => {
               Object.entries(updates).forEach(([key, value]) => {
                 onUpdateProperty(key as keyof Sample, value);

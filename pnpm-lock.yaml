@@ -116,9 +116,9 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
-      juce-framework-frontend:
-        specifier: link:external\JUCE\modules\juce_gui_extra\native\javascript
-        version: link:external/JUCE/modules/juce_gui_extra/native/javascript
+      juce-framework-frontend-mirror:
+        specifier: ^7.0.11
+        version: 7.0.11
       lodash:
         specifier: ^4.17.21
         version: 4.17.21
@@ -1931,6 +1931,9 @@ packages:
 
   jszip@3.10.1:
     resolution: {integrity: sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==}
+
+  juce-framework-frontend-mirror@7.0.11:
+    resolution: {integrity: sha512-gnoMAMrNBKcPFt78ccxg/sbSt5OqQ2c32QKOQyioFAE3iSueetQwGz/P6FFusUmArDQNltGGmaU3/yP5/0NwAg==}
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -4119,6 +4122,8 @@ snapshots:
       pako: 1.0.11
       readable-stream: 2.3.8
       setimmediate: 1.0.5
+
+  juce-framework-frontend-mirror@7.0.11: {}
 
   keyv@4.5.4:
     dependencies:

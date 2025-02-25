@@ -5,6 +5,7 @@ import { DrumPad, Sample } from './types';
 import { useOSMP } from '@/hooks/useOSMP';
 import { FileDialog } from '@/components/ui/file-dialog';
 import * as Tone from 'tone';
+import { useJUCEAudio } from '../jucebackend/guicomponents/useJUCEAudio';
 
 const STORAGE_KEY = 'drum-machine-preset';
 // const DEBOUNCE_TIME = 100; // ms
@@ -27,6 +28,15 @@ const DrumSampler = () => {
   const players = useRef<{ [key: number]: Tone.Player }>({});
   const envelopes = useRef<{ [key: number]: Tone.AmplitudeEnvelope }>({});
   const effects = useRef<{ [key: number]: { compressor: Tone.Compressor, reverb: Tone.Reverb } }>({});
+
+  // Add JUCE audio integration
+  const { 
+    isJUCEAvailable, 
+    loadSample: loadJUCESample, 
+    playSample: playJUCESample,
+    updateParameter: updateJUCEParameter,
+    clearPad: clearJUCEPad
+  } = useJUCEAudio();
 
   useEffect(() => {
     const handleFileOperation = async (event: CustomEvent) => {
@@ -53,19 +63,23 @@ const DrumSampler = () => {
   }, [pads]);
 
   useEffect(() => {
-    // Initialize Tone.js
-    Tone.start();
+    if (!isJUCEAvailable) {
+      // Initialize Tone.js only if JUCE is not available
+      Tone.start();
+    }
     
     return () => {
       // Cleanup players on unmount
-      Object.values(players.current).forEach(player => player.dispose());
-      Object.values(envelopes.current).forEach(env => env.dispose());
-      Object.values(effects.current).forEach(effect => {
-        effect.compressor.dispose();
-        effect.reverb.dispose();
-      });
+      if (!isJUCEAvailable) {
+        Object.values(players.current).forEach(player => player.dispose());
+        Object.values(envelopes.current).forEach(env => env.dispose());
+        Object.values(effects.current).forEach(effect => {
+          effect.compressor.dispose();
+          effect.reverb.dispose();
+        });
+      }
     };
-  }, []);
+  }, [isJUCEAvailable]);
 
   // Save to localStorage whenever pads change
   useEffect(() => {
@@ -129,10 +143,15 @@ const DrumSampler = () => {
 
       setPads(newPads);
 
-      // Recreate audio elements
-      newPads.forEach((pad: { sample: { url: string | undefined; }; id: number; }) => {
+      // Load samples into JUCE or create audio elements
+      newPads.forEach((pad: DrumPad) => {
         if (pad.sample?.url) {
-          audioRefs.current[pad.id] = new Audio(pad.sample.url);
+          if (isJUCEAvailable) {
+            loadJUCESample(pad.id, pad.sample.url, pad.sample);
+          } else {
+            audioRefs.current[pad.id] = new Audio(pad.sample.url);
+            setupTonePlayer(pad.id, pad.sample.url, pad.sample);
+          }
         }
       });
     } catch (error) {
@@ -145,6 +164,11 @@ const DrumSampler = () => {
   };
 
   const setupTonePlayer = (padId: number, url: string, sample: Sample) => {
+    if (isJUCEAvailable) {
+      loadJUCESample(padId, url, sample);
+      return;
+    }
+
     // Dispose existing player if any
     players.current[padId]?.dispose();
     envelopes.current[padId]?.dispose();
@@ -219,16 +243,23 @@ const DrumSampler = () => {
           threshold: -20,
           ratio: 4,
           attack: 0.003,
-          release: 0.25
+          release: 0.25,
+          enabled: true
         },
         reverb: {
           wet: 0.3,
           decay: 1.5,
-          preDelay: 0.01
+          preDelay: 0.01,
+          enabled: true
         }
       };
 
-      setupTonePlayer(padId, url, newSample);
+      // Set up audio engine (JUCE or Tone.js)
+      if (isJUCEAvailable) {
+        loadJUCESample(padId, url, newSample);
+      } else {
+        setupTonePlayer(padId, url, newSample);
+      }
       
       setPads(prev => prev.map(pad => 
         pad.id === padId ? {
@@ -241,6 +272,12 @@ const DrumSampler = () => {
 
   // Add smooth parameter interpolation
   const updateDSPParameters = useCallback((padId: number, property: keyof Sample, value: any, immediate = false) => {
+    // If JUCE is available, use that instead
+    if (isJUCEAvailable) {
+      updateJUCEParameter(padId, property, value);
+      return;
+    }
+    
     const envelope = envelopes.current[padId];
     const padEffects = effects.current[padId];
     
@@ -287,7 +324,7 @@ const DrumSampler = () => {
         }
         break;
     }
-  }, []);
+  }, [isJUCEAvailable, updateJUCEParameter]);
 
   const updatePadProperty = (
     padId: number,
@@ -309,6 +346,11 @@ const DrumSampler = () => {
   };
 
   const removeSample = (padId: number) => {
+    // Clear from JUCE if available
+    if (isJUCEAvailable) {
+      clearJUCEPad(padId);
+    }
+    
     setPads(prev => prev.map(pad => 
       pad.id === padId ? {
         ...pad,
@@ -318,10 +360,20 @@ const DrumSampler = () => {
   };
 
   const playSound = (padId: number) => {
-    const now = Tone.now();
     const pad = pads[padId];
     if (!pad.sample) return;
+    
+    // Use JUCE if available
+    if (isJUCEAvailable) {
+      playJUCESample(padId);
+      setPlayingPad(padId);
+      setTimeout(() => setPlayingPad(null), 200);
+      return;
+    }
 
+    // Fallback to Tone.js
+    const now = Tone.now();
+    
     // Handle choke groups
     if (pad.sample.chokeGroup > 0) {
       pads.forEach((otherPad, index) => {
@@ -361,7 +413,7 @@ const DrumSampler = () => {
     <>
       <div className="w-full h-full  bg-zinc-900 flex flex-col">
         <div className="p-4 border-b border-zinc-800">
-          <h2 className="text-zinc-400 text-sm font-medium">Drum Machine</h2>
+          <h2 className="text-zinc-400 text-sm font-medium">Drum Machine {isJUCEAvailable && "(JUCE)"}</h2>
         </div>
         <div className="flex-1 p-2">
           <div className="grid grid-cols-4 gap-2">

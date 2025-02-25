@@ -4,24 +4,29 @@ import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions';
 import { Play, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sample } from './types';
+import { JUCEVisualizer } from '../jucebackend/guicomponents/JUCEVisualizer';
+import { useJUCEBridge } from '@/hooks/useJUCEBridge';
 
 interface SampleEditorProps {
   sample: Sample;
   onUpdateSample: (updates: Partial<Sample>) => void;
+  padId?: number;
 }
 
 type WaveSurferWithRegions = WaveSurfer & {
   addRegion: (params: any) => any;
 };
 
-export function SampleEditor({ sample, onUpdateSample }: SampleEditorProps) {
+export function SampleEditor({ sample, onUpdateSample, padId = 0 }: SampleEditorProps) {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
   const activeRegion = useRef<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const { isAvailable: isJUCEAvailable } = useJUCEBridge();
 
   useEffect(() => {
-    if (!waveformRef.current) return;
+    // Only initialize WaveSurfer if JUCE is not available
+    if (!waveformRef.current || isJUCEAvailable) return;
 
     wavesurfer.current = WaveSurfer.create({
       container: waveformRef.current,
@@ -30,7 +35,6 @@ export function SampleEditor({ sample, onUpdateSample }: SampleEditorProps) {
       cursorColor: '#ffffff',
       height: 80,
       normalize: true,
-    //   splitChannels: false,
       interact: true,
       plugins: [
         RegionsPlugin.create()
@@ -69,9 +73,23 @@ export function SampleEditor({ sample, onUpdateSample }: SampleEditorProps) {
     return () => {
       wavesurfer.current?.destroy();
     };
-  }, [sample.url]);
+  }, [sample.url, isJUCEAvailable, onUpdateSample]);
 
   const togglePlayback = () => {
+    if (isJUCEAvailable) {
+      // Use JUCE for playback (handled by parent component through events)
+      // Just toggle the playing state
+      const event = new CustomEvent('juce-play-sample', {
+        detail: {
+          padId,
+          play: !isPlaying
+        }
+      });
+      window.dispatchEvent(event);
+      setIsPlaying(!isPlaying);
+      return;
+    }
+    
     if (!wavesurfer.current) return;
     
     if (isPlaying) {
@@ -81,6 +99,21 @@ export function SampleEditor({ sample, onUpdateSample }: SampleEditorProps) {
     }
     setIsPlaying(!isPlaying);
   };
+
+  // Stop playback when unmounted
+  useEffect(() => {
+    return () => {
+      if (isPlaying && isJUCEAvailable) {
+        const event = new CustomEvent('juce-play-sample', {
+          detail: {
+            padId,
+            play: false
+          }
+        });
+        window.dispatchEvent(event);
+      }
+    };
+  }, [isPlaying, isJUCEAvailable, padId]);
 
   return (
     <div className="w-full space-y-2">
@@ -94,7 +127,18 @@ export function SampleEditor({ sample, onUpdateSample }: SampleEditorProps) {
           {isPlaying ? <Square size={14} /> : <Play size={14} />}
         </Button>
       </div>
-      <div ref={waveformRef} className="w-full bg-zinc-800/50 rounded" />
+      
+      {isJUCEAvailable ? (
+        // Use JUCE visualizer when available
+        <JUCEVisualizer 
+          padId={padId} 
+          type="both" 
+          className="w-full h-[80px]" 
+        />
+      ) : (
+        // Fall back to WaveSurfer
+        <div ref={waveformRef} className="w-full bg-zinc-800/50 rounded" />
+      )}
     </div>
   );
 }

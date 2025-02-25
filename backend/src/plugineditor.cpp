@@ -9,6 +9,7 @@
 #include "pluginprocessor.hpp"
 #include "plugineditor.hpp"
 #include <unordered_map>
+#include <json/json.h>
 
 namespace {
     template <typename T>
@@ -18,23 +19,161 @@ namespace {
 }
 
 //==============================================================================
-OpenSamplerAudioProcessorEditor::OpenSamplerAudioProcessorEditor (OpenSamplerAudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+// MIDIBridge implementation
+
+MIDIBridge::MIDIBridge(OpenSamplerAudioProcessor& p)
+    : audioProcessor(p)
 {
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
+    // Set up MIDI message callback
+    midiCallback = [this](const juce::MidiMessage& message) {
+        if (!isProcessingMessage)
+        {
+            Json::Value jsonMessage = midiMessageToJson(message);
+            sendToWeb(jsonMessage);
+        }
+    };
+    
+    // Register callback with processor
+    audioProcessor.addMidiMessageListener(midiCallback);
+}
+
+MIDIBridge::~MIDIBridge()
+{
+    // Unregister callback
+    audioProcessor.removeMidiMessageListener(midiCallback);
+}
+
+void MIDIBridge::handleWebMessage(const juce::var& message)
+{
+    // Set flag to avoid recursive calls
+    isProcessingMessage = true;
+    
+    // Parse the message type
+    if (message.hasProperty("type") && message.hasProperty("action") && message.hasProperty("data"))
+    {
+        juce::String type = message["type"];
+        juce::String action = message["action"];
+        juce::var data = message["data"];
+        
+        if (type == "midi")
+        {
+            if (action == "noteOn" && data.hasProperty("note") && data.hasProperty("velocity") && data.hasProperty("channel"))
+            {
+                int note = static_cast<int>(data["note"]);
+                float velocity = static_cast<float>(static_cast<double>(data["velocity"]) / 127.0);
+                int channel = static_cast<int>(data["channel"]);
+                audioProcessor.sendMidiNoteOn(channel, note, velocity);
+            }
+            else if (action == "noteOff" && data.hasProperty("note") && data.hasProperty("channel"))
+            {
+                int note = static_cast<int>(data["note"]);
+                int channel = static_cast<int>(data["channel"]);
+                audioProcessor.sendMidiNoteOff(channel, note);
+            }
+            else if (action == "controlChange" && data.hasProperty("controller") && data.hasProperty("value") && data.hasProperty("channel"))
+            {
+                int controller = static_cast<int>(data["controller"]);
+                int value = static_cast<int>(data["value"]);
+                int channel = static_cast<int>(data["channel"]);
+                audioProcessor.sendMidiControlChange(channel, controller, value);
+            }
+            else if (action == "getInputs")
+            {
+                // Get available MIDI input devices
+                juce::StringArray devices = audioProcessor.getMidiInputDevices();
+                
+                Json::Value response;
+                response["type"] = "midiDeviceList";
+                response["data"]["inputs"] = Json::Value(Json::arrayValue);
+                
+                for (auto& device : devices)
+                {
+                    response["data"]["inputs"].append(device.toStdString());
+                }
+                
+                sendToWeb(response);
+            }
+            else if (action == "selectInput" && data.hasProperty("deviceName"))
+            {
+                // Select MIDI input device
+                juce::String deviceName = data["deviceName"].toString();
+                audioProcessor.setMidiInput(deviceName);
+                
+                Json::Value response;
+                response["type"] = "midiInputSelected";
+                response["data"]["deviceName"] = deviceName.toStdString();
+                sendToWeb(response);
+            }
+        }
+    }
+    
+    // Reset flag
+    isProcessingMessage = false;
+}
+
+Json::Value MIDIBridge::midiMessageToJson(const juce::MidiMessage& message)
+{
+    Json::Value jsonMessage;
+    jsonMessage["type"] = "midi";
+    
+    if (message.isNoteOn())
+    {
+        jsonMessage["data"]["type"] = "noteOn";
+        jsonMessage["data"]["note"] = message.getNoteNumber();
+        jsonMessage["data"]["velocity"] = message.getVelocity();
+        jsonMessage["data"]["channel"] = message.getChannel() - 1; // Convert 1-based to 0-based
+    }
+    else if (message.isNoteOff())
+    {
+        jsonMessage["data"]["type"] = "noteOff";
+        jsonMessage["data"]["note"] = message.getNoteNumber();
+        jsonMessage["data"]["channel"] = message.getChannel() - 1;
+    }
+    else if (message.isController())
+    {
+        jsonMessage["data"]["type"] = "controlChange";
+        jsonMessage["data"]["controller"] = message.getControllerNumber();
+        jsonMessage["data"]["value"] = message.getControllerValue();
+        jsonMessage["data"]["channel"] = message.getChannel() - 1;
+    }
+    
+    return jsonMessage;
+}
+
+void MIDIBridge::sendToWeb(const Json::Value& data)
+{
+    Json::FastWriter writer;
+    juce::String jsonString = writer.write(data);
+    
+    // Get reference to editor for sending the message
+    if (auto* editor = dynamic_cast<OpenSamplerAudioProcessorEditor*>(audioProcessor.getActiveEditor()))
+    {
+        editor->sendMessageToWebView(jsonString);
+    }
+}
+
+//==============================================================================
+OpenSamplerAudioProcessorEditor::OpenSamplerAudioProcessorEditor(OpenSamplerAudioProcessor& p)
+    : AudioProcessorEditor(&p), audioProcessor(p)
+{
+    // Create MIDI bridge
+    midiBridge = std::make_unique<MIDIBridge>(p);
+    
+    // Add web component
     addAndMakeVisible(webComponent);
-    // webComponent.goToURL("http://localhost:5173/");
     webComponent.goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
-    setSize (1024, 768);
+    
+    // Set initial size
+    setSize(1024, 768);
 }
 
 OpenSamplerAudioProcessorEditor::~OpenSamplerAudioProcessorEditor()
 {
+    // Clean up
+    midiBridge = nullptr;
 }
 
-//==============================================================================
-void OpenSamplerAudioProcessorEditor::paint (juce::Graphics& g)
+void OpenSamplerAudioProcessorEditor::paint(juce::Graphics& g)
 {
     g.fillAll(
         getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
@@ -94,4 +233,18 @@ const char* OpenSamplerAudioProcessorEditor::getMimeForExtension(
 
     jassertfalse;
     return "";
+}
+
+void OpenSamplerAudioProcessorEditor::handleWebMessage(const juce::var& message)
+{
+    if (midiBridge)
+    {
+        midiBridge->handleWebMessage(message);
+    }
+}
+
+void OpenSamplerAudioProcessorEditor::sendMessageToWebView(const juce::String& jsonMessage)
+{
+    // Send message to the web view
+    webComponent.evaluateJavaScript("window.juceBridge.onmessage('" + jsonMessage.replace("'", "\\'") + "');");
 }
