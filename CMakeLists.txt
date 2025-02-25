@@ -82,7 +82,7 @@ juce_add_binary_data(OpenSamplerResources
 target_sources(OpenSampler PRIVATE
     src/main/pluginprocessor.cpp
     src/main/plugineditor.cpp
-    src/core/dsp/reverb.cpp
+    src/core/dsp/effect/reverb.cpp
     src/core/sampler/parser.cpp
 )
 
@@ -90,7 +90,7 @@ target_sources(OpenSampler PRIVATE
 target_sources(OpenSampler PRIVATE
     src/main/pluginprocessor.hpp
     src/main/plugineditor.hpp
-    src/core/dsp/reverb.hpp
+    src/core/dsp/effect/reverb.hpp
     src/core/sampler/parser.hpp
 )
 

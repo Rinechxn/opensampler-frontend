@@ -8,3 +8,9 @@
 [submodule "external/jsoncpp"]
 	path = external/jsoncpp
 	url = https://github.com/open-source-parsers/jsoncpp
+[submodule "external/fftw3"]
+	path = external/fftw3
+	url = https://github.com/FFTW/fftw3
+[submodule "external/fluidsynth"]
+	path = external/fluidsynth
+	url = https://github.com/FluidSynth/fluidsynth
