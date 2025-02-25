@@ -1,4 +1,6 @@
+![localhost_5173_ (1)](https://github.com/user-attachments/assets/e6fc1349-6d5d-4c62-978d-baf8d43e04bf)
 # OpenSampler: Open-source Sample instrument platform
+
 
 OpenSampler is a lightweight, extensible environment for managing and playing digital instruments.
 It provides easy setup, a modular design, and rapid iteration—even across large sample libraries.
